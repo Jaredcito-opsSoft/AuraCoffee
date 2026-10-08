@@ -1,0 +1,615 @@
+// ===========================================================================
+// schema.prisma — BrewDesk: Sistema de Gestión y Control de Cafeterías
+// ORM: Prisma 6  |  DB: PostgreSQL 16 (Supabase)
+// Convención monetaria: TODOS los valores en CENTAVOS ENTEROS (Int)
+// Nunca usar Float para valores monetarios.
+// ===========================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // Necesario para Supabase + Prisma
+}
+
+// ===========================================================================
+// 1. CONFIGURACIÓN DEL NEGOCIO
+// ===========================================================================
+
+model BusinessSetting {
+  id                        Int      @id @default(autoincrement())
+  businessName              String   @default("BrewDesk Cafetería") @db.VarChar(150)
+  taxId                     String?  @db.VarChar(30)   // RFC / NIF / RUT
+  phone                     String?  @db.VarChar(30)
+  email                     String?  @db.VarChar(100)
+  address                   String?  @db.Text
+  ticketHeader              String?  @default("¡Bienvenidos a BrewDesk!") @db.Text
+  ticketFooter              String?  @default("¡Gracias, esperamos verte pronto!") @db.Text
+  currency                  String   @default("MXN") @db.VarChar(10)
+  taxPercentage             Decimal  @default(0.00) @db.Decimal(5, 2)
+  suggestedTipPercentages   Int[]    @default([10, 15, 20]) // [10, 15, 20] %
+  requireOpenCashForOrders  Boolean  @default(true)
+  lowStockAlertEnabled      Boolean  @default(true)
+  updatedAt                 DateTime @updatedAt
+
+  @@map("business_settings")
+}
+
+// ===========================================================================
+// 2. AUDITORÍA
+// ===========================================================================
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String   @db.VarChar(60)   // 'order_cancel', 'price_override', etc.
+  entity    String   @db.VarChar(60)   // 'orders', 'sales', 'cash_sessions'
+  entityId  String?  @db.VarChar(60)
+  details   Json?
+  ipAddress String?  @db.VarChar(45)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ===========================================================================
+// 3. USUARIOS Y ROLES
+// ===========================================================================
+
+enum UserRole {
+  admin
+  manager
+  cashier
+  barista
+  waiter
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  supabaseUid  String    @unique @db.VarChar(100) // UUID de Supabase Auth
+  name         String    @db.VarChar(120)
+  email        String    @unique @db.VarChar(120)
+  role         UserRole  @default(cashier)
+  pinCode      String?   @db.VarChar(10)  // PIN 4-6 dígitos para autorización rápida
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Relaciones
+  auditLogs          AuditLog[]
+  cashSessions       CashSession[]
+  cashMovements      CashMovement[]
+  orders             Order[]            @relation("WaiterOrders")
+  sales              Sale[]
+  inventoryMovements InventoryMovement[]
+
+  @@map("users")
+}
+
+// ===========================================================================
+// 4. FOLIOS ATÓMICOS CONSECUTIVOS
+// ===========================================================================
+
+model FolioCounter {
+  id           Int      @id @default(autoincrement())
+  scope        String   @unique @db.VarChar(50) // 'ticket_sale' | 'order_command' | 'purchase_order'
+  prefix       String   @default("") @db.VarChar(10) // 'TKT-' | 'CMD-' | 'OC-'
+  currentValue Int      @default(0)
+  padding      Int      @default(4)  // 4 → '0001'
+  updatedAt    DateTime @updatedAt
+
+  @@map("folio_counters")
+}
+
+// ===========================================================================
+// 5. MESAS Y ÁREAS DEL SALÓN
+// ===========================================================================
+
+model TableArea {
+  id           Int               @id @default(autoincrement())
+  name         String            @db.VarChar(80) // 'Salón', 'Terraza', 'Barra Alta'
+  displayOrder Int               @default(0)
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+
+  tables       RestaurantTable[]
+
+  @@map("table_areas")
+}
+
+enum TableStatus {
+  free
+  busy
+  reserved
+  closing
+}
+
+model RestaurantTable {
+  id            Int         @id @default(autoincrement())
+  areaId        Int
+  area          TableArea   @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  tableNumber   String      @db.VarChar(20) // 'M-01', 'T-04', 'BAR-1'
+  capacity      Int         @default(2)
+  status        TableStatus @default(free)
+  activeOrderId Int?
+  posX          Int?        @default(0) // Coordenada para mapa visual del salón
+  posY          Int?        @default(0)
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+
+  orders        Order[]
+
+  @@index([areaId])
+  @@index([status])
+  @@map("restaurant_tables")
+}
+
+// ===========================================================================
+// 6. CATÁLOGO: CATEGORÍAS, PRODUCTOS, VARIANTES Y MODIFICADORES
+// ===========================================================================
+
+model Category {
+  id           Int       @id @default(autoincrement())
+  name         String    @db.VarChar(80)  // 'Café Caliente', 'Café Frío', 'Repostería'
+  slug         String    @unique @db.VarChar(80)
+  description  String?   @db.Text
+  colorHex     String?   @default("#D97706") @db.VarChar(10) // Color en TPV táctil
+  iconName     String?   @default("Coffee") @db.VarChar(50)
+  displayOrder Int       @default(0)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+
+  products     Product[]
+
+  @@map("categories")
+}
+
+enum PreparationStation {
+  barista_hot    // Café caliente: espresso, latte, cappuccino
+  barista_cold   // Café frío: cold brew, frappé
+  kitchen        // Cocina: desayunos, sándwiches
+  bakery_direct  // Repostería: directo del exhibidor
+  none           // Sin preparación (agua embotellada, etc.)
+}
+
+model Product {
+  id                 Int                @id @default(autoincrement())
+  categoryId         Int
+  category           Category           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  name               String             @db.VarChar(120) // 'Flat White', 'Latte', 'Americano'
+  slug               String             @db.VarChar(120)
+  description        String?            @db.Text
+  sku                String?            @db.VarChar(50)
+  imageUrl           String?            @db.Text
+  hasVariants        Boolean            @default(false) // Si maneja Chico/Mediano/Grande
+  basePriceCents     Int                @default(0)  // En centavos, si NO tiene variantes
+  baseCostCents      Int                @default(0)
+  preparationStation PreparationStation @default(barista_hot)
+  isAvailable        Boolean            @default(true)
+  isFavorite         Boolean            @default(false) // Sección de acceso rápido en POS
+  displayOrder       Int                @default(0)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  // Relaciones
+  variants           ProductVariant[]
+  recipes            Recipe[]
+  modifierGroupLinks ProductModifierGroup[]
+  orderItems         OrderItem[]
+
+  @@index([categoryId])
+  @@index([preparationStation])
+  @@index([isAvailable])
+  @@map("products")
+}
+
+model ProductVariant {
+  id           Int       @id @default(autoincrement())
+  productId    Int
+  product      Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name         String    @db.VarChar(60) // 'Chico (8oz)', 'Mediano (12oz)', 'Grande (16oz)'
+  sku          String?   @db.VarChar(50)
+  priceCents   Int       @default(0)
+  costCents    Int       @default(0)
+  displayOrder Int       @default(0)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+
+  recipes    Recipe[]
+  orderItems OrderItem[]
+
+  @@index([productId])
+  @@map("product_variants")
+}
+
+// Grupos de modificadores: "Tipo de Leche", "Jarabes", "Extras Espresso"
+model ModifierGroup {
+  id           Int      @id @default(autoincrement())
+  name         String   @db.VarChar(80)
+  minSelect    Int      @default(0) // 0 = opcional, 1 = obligatorio
+  maxSelect    Int      @default(1) // 1 = única elección, >1 = múltiple
+  isRequired   Boolean  @default(false)
+  displayOrder Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  modifiers    Modifier[]
+  productLinks ProductModifierGroup[]
+
+  @@map("modifier_groups")
+}
+
+// Modificador individual: "Leche de Avena +$15", "Shot Extra +$12"
+model Modifier {
+  id              Int            @id @default(autoincrement())
+  groupId         Int
+  group           ModifierGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name            String         @db.VarChar(80)
+  extraPriceCents Int            @default(0)
+  // Vínculo opcional al inventario: seleccionar este modificador descuenta insumo
+  inventoryItemId Int?
+  inventoryItem   InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+  deductQuantity  Decimal?       @db.Decimal(12, 3) // Cantidad a descontar
+  displayOrder    Int            @default(0)
+  isActive        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+
+  orderItemModifiers OrderItemModifier[]
+
+  @@index([groupId])
+  @@map("modifiers")
+}
+
+// Relación N:M Productos <-> Grupos de Modificadores
+model ProductModifierGroup {
+  id              Int           @id @default(autoincrement())
+  productId       Int
+  product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  modifierGroupId Int
+  modifierGroup   ModifierGroup @relation(fields: [modifierGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, modifierGroupId])
+  @@map("product_modifier_groups")
+}
+
+// ===========================================================================
+// 7. INVENTARIO DE INSUMOS, RECETAS Y KARDEX
+// ===========================================================================
+
+model InventoryItem {
+  id               Int      @id @default(autoincrement())
+  name             String   @db.VarChar(120) // 'Café Grano Chiapas', 'Leche Entera', 'Vaso 12oz'
+  sku              String?  @db.VarChar(50)
+  category         String   @default("general") @db.VarChar(50)
+  // 'coffee_beans' | 'dairy' | 'syrups' | 'disposables' | 'kitchen_supplies'
+  unit             String   @default("unit") @db.VarChar(20) // 'g', 'ml', 'unit', 'kg', 'l'
+  currentStock     Decimal  @default(0) @db.Decimal(12, 3)
+  minimumStock     Decimal  @default(0) @db.Decimal(12, 3) // Umbral de alerta semáforo
+  costPerUnitCents Int      @default(0) // Centavos por unidad base (por gramo, ml, pieza)
+  yieldFactor      Decimal  @default(1.00) @db.Decimal(5, 2) // Factor de rendimiento
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relaciones
+  recipeIngredients RecipeIngredient[]
+  movements         InventoryMovement[]
+  modifiers         Modifier[]
+
+  @@index([category])
+  @@map("inventory_items")
+}
+
+// Receta / Ficha Técnica: vincula Producto con sus insumos (BOM)
+model Recipe {
+  id           Int             @id @default(autoincrement())
+  productId    Int
+  product      Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId    Int?            // null = receta base; con valor = receta por tamaño
+  variant      ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  name         String          @db.VarChar(120) // 'Receta Latte 12oz'
+  instructions String?         @db.Text  // Calibración, temperatura, tiempo de extracción
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  ingredients  RecipeIngredient[]
+
+  @@index([productId])
+  @@index([variantId])
+  @@map("recipes")
+}
+
+// Insumos que componen la receta
+model RecipeIngredient {
+  id              Int           @id @default(autoincrement())
+  recipeId        Int
+  recipe          Recipe        @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  inventoryItemId Int
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  quantity        Decimal       @db.Decimal(12, 3) // 18.000g | 220.000ml | 1.000 pieza
+  isOptional      Boolean       @default(false)
+  lossPercentage  Decimal       @default(0.00) @db.Decimal(5, 2) // Merma prevista %
+  createdAt       DateTime      @default(now())
+
+  @@index([recipeId])
+  @@index([inventoryItemId])
+  @@map("recipe_ingredients")
+}
+
+// Kardex INMUTABLE de movimientos de insumos — ningún registro se elimina
+model InventoryMovement {
+  id                Int           @id @default(autoincrement())
+  inventoryItemId   Int
+  inventoryItem     InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  movementType      String        @db.VarChar(40)
+  // 'sale_consumption' | 'waste_loss' | 'stock_entry'
+  // 'purchase_receipt' | 'adjustment' | 'cancel_return' | 'physical_count'
+  quantity          Decimal       @db.Decimal(12, 3) // Negativo = salida, Positivo = entrada
+  stockBefore       Decimal       @db.Decimal(12, 3)
+  stockAfter        Decimal       @db.Decimal(12, 3)
+  costCentsSnapshot Int           @default(0) // Costo unitario capturado al momento
+  referenceType     String?       @db.VarChar(40) // 'order_item' | 'purchase_order' | 'waste_log'
+  referenceId       String?       @db.VarChar(50)
+  reason            String?       @db.Text  // "Leche cortada", "Calibración molino"
+  createdById       Int?
+  createdBy         User?         @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt         DateTime      @default(now())
+
+  @@index([inventoryItemId])
+  @@index([movementType])
+  @@index([createdAt])
+  @@map("inventory_movements")
+}
+
+// ===========================================================================
+// 8. COMANDAS / ÓRDENES Y KDS (Kitchen Display System)
+// ===========================================================================
+
+enum OrderType {
+  dine_in   // Consumo en mesa
+  takeaway  // Para llevar
+}
+
+enum OrderStatus {
+  open           // Comanda abierta, tomando pedido
+  in_preparation // En barra/cocina
+  served         // Entregado al cliente
+  paid           // Cobrado y cerrado
+  cancelled      // Cancelado
+}
+
+model Order {
+  id            Int              @id @default(autoincrement())
+  folio         String           @unique @db.VarChar(30) // 'CMD-0001'
+  orderType     OrderType        @default(dine_in)
+  tableId       Int?             // Null si es takeaway
+  table         RestaurantTable? @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  status        OrderStatus      @default(open)
+  customerName  String?          @db.VarChar(80) // Nombre para vocear en barra (takeaway)
+  guestCount    Int              @default(1)
+  waiterId      Int?
+  waiter        User?            @relation("WaiterOrders", fields: [waiterId], references: [id], onDelete: SetNull)
+  notes         String?          @db.Text
+  subtotalCents Int              @default(0)
+  discountCents Int              @default(0)
+  totalCents    Int              @default(0)
+  openedAt      DateTime         @default(now())
+  closedAt      DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  items         OrderItem[]
+  sales         Sale[]
+
+  @@index([folio])
+  @@index([tableId])
+  @@index([status])
+  @@index([openedAt])
+  @@map("orders")
+}
+
+enum KdsStatus {
+  pending      // Recién enviado, en espera
+  preparing    // Barista/cocina lo tomó
+  ready        // Listo para entregar
+  delivered    // Entregado al cliente
+  cancelled    // Cancelado
+}
+
+model OrderItem {
+  id                   Int             @id @default(autoincrement())
+  orderId              Int
+  order                Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId            Int
+  product              Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variantId            Int?
+  variant              ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  quantity             Int             @default(1)
+  unitPriceCents       Int             @default(0) // Snapshot del precio al vender
+  unitCostCents        Int             @default(0) // Snapshot del costo teórico
+  subtotalCents        Int             @default(0)
+  notes                String?         @db.Text // "Poco caliente", "Sin azúcar", "En taza barro"
+  // KDS — Estado de preparación
+  kdsStation           String          @default("barista_hot") @db.VarChar(30)
+  kdsStatus            KdsStatus       @default(pending)
+  preparationStartedAt DateTime?
+  preparedAt           DateTime?
+  deliveredAt          DateTime?
+  createdAt            DateTime        @default(now())
+
+  modifiers            OrderItemModifier[]
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([kdsStation, kdsStatus])
+  @@map("order_items")
+}
+
+// Modificadores seleccionados por el cliente para cada ítem
+model OrderItemModifier {
+  id           Int       @id @default(autoincrement())
+  orderItemId  Int
+  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  modifierId   Int
+  modifier     Modifier  @relation(fields: [modifierId], references: [id], onDelete: Restrict)
+  nameSnapshot String    @db.VarChar(80) // Snapshot del nombre al vender
+  priceCents   Int       @default(0)
+  createdAt    DateTime  @default(now())
+
+  @@index([orderItemId])
+  @@map("order_item_modifiers")
+}
+
+// ===========================================================================
+// 9. VENTAS Y PAGOS MIXTOS
+// ===========================================================================
+
+enum SaleStatus {
+  completed
+  cancelled
+  refunded
+}
+
+model Sale {
+  id                  Int        @id @default(autoincrement())
+  folio               String     @unique @db.VarChar(30) // 'TKT-0001'
+  orderId             Int?
+  order               Order?     @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  cashSessionId       Int
+  cashSession         CashSession @relation(fields: [cashSessionId], references: [id], onDelete: Restrict)
+  cashierId           Int
+  cashier             User       @relation(fields: [cashierId], references: [id], onDelete: Restrict)
+  customerName        String?    @db.VarChar(100)
+  customerId          Int?
+  customer            Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  subtotalCents       Int        @default(0)
+  discountCents       Int        @default(0)
+  taxCents            Int        @default(0)
+  tipCents            Int        @default(0) // Propina voluntaria en centavos
+  totalCents          Int        @default(0) // subtotal - discount + tax + tip
+  amountPaidCents     Int        @default(0) // Total entregado por el cliente
+  changeReturnedCents Int        @default(0) // Cambio devuelto en efectivo
+  status              SaleStatus @default(completed)
+  notes               String?    @db.Text
+  createdAt           DateTime   @default(now())
+
+  payments            SalePayment[]
+
+  @@index([folio])
+  @@index([orderId])
+  @@index([cashSessionId])
+  @@index([createdAt])
+  @@map("sales")
+}
+
+// Pagos divididos: parte en efectivo + parte en tarjeta
+model SalePayment {
+  id              Int      @id @default(autoincrement())
+  saleId          Int
+  sale            Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  paymentMethod   String   @db.VarChar(30) // 'cash' | 'card_debit' | 'card_credit' | 'transfer' | 'qr'
+  amountCents     Int      @default(0)
+  tipPortionCents Int      @default(0) // Propina cargada a este método
+  reference       String?  @db.VarChar(80) // Últimos 4 dígitos, núm. autorización, clave SPEI
+  createdAt       DateTime @default(now())
+
+  @@index([saleId])
+  @@index([paymentMethod])
+  @@map("sale_payments")
+}
+
+// ===========================================================================
+// 10. CAJA, TURNOS Y CORTES (X Y Z)
+// ===========================================================================
+
+model CashRegister {
+  id        Int           @id @default(autoincrement())
+  code      String        @unique @db.VarChar(30) // 'CAJA-01', 'BARRA-01'
+  name      String        @db.VarChar(80) // 'Caja Mostrador Principal'
+  isActive  Boolean       @default(true)
+  createdAt DateTime      @default(now())
+
+  sessions  CashSession[]
+
+  @@map("cash_registers")
+}
+
+enum CashSessionStatus {
+  open
+  closed
+}
+
+model CashSession {
+  id                  Int               @id @default(autoincrement())
+  cashRegisterId      Int
+  cashRegister        CashRegister      @relation(fields: [cashRegisterId], references: [id], onDelete: Restrict)
+  userId              Int
+  user                User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  status              CashSessionStatus @default(open)
+  openingBalanceCents Int               @default(0) // Fondo de caja inicial
+  expectedCashCents   Int               @default(0) // Calculado por el sistema al corte
+  actualCashCents     Int?              // Conteo físico ciego del cajero
+  cashDifferenceCents Int?              // Sobrante (+) o faltante (-) en centavos
+  totalCardCents      Int               @default(0)
+  totalTransferCents  Int               @default(0)
+  totalTipsCents      Int               @default(0)
+  openedAt            DateTime          @default(now())
+  closedAt            DateTime?
+  closingNotes        String?           @db.Text
+  createdAt           DateTime          @default(now())
+
+  sales               Sale[]
+  movements           CashMovement[]
+
+  @@index([cashRegisterId])
+  @@index([status])
+  @@index([userId])
+  @@map("cash_sessions")
+}
+
+model CashMovement {
+  id             Int         @id @default(autoincrement())
+  cashSessionId  Int
+  cashSession    CashSession @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
+  type           String      @db.VarChar(30)
+  // 'in_deposit' | 'out_withdrawal' | 'petty_cash_expense' | 'tip_payout'
+  amountCents    Int
+  reason         String      @db.Text // "Compra de hielo", "Retiro parcial de seguridad"
+  authorizedById Int?
+  authorizedBy   User?       @relation(fields: [authorizedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime    @default(now())
+
+  @@index([cashSessionId])
+  @@index([type])
+  @@map("cash_movements")
+}
+
+// ===========================================================================
+// 11. FIDELIZACIÓN DE CLIENTES
+// ===========================================================================
+
+model Customer {
+  id            Int      @id @default(autoincrement())
+  name          String   @db.VarChar(120)
+  phone         String   @unique @db.VarChar(20) // Identificador primario (teléfono)
+  email         String?  @db.VarChar(120)
+  loyaltyPoints Int      @default(0) // Puntos acumulados
+  visitCount    Int      @default(0) // Visitas totales registradas
+  notes         String?  @db.Text   // Preferencias: "Sin azúcar", "Alérgico a nueces"
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sales         Sale[]
+
+  @@index([phone])
+  @@map("customers")
+}

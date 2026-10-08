@@ -1,0 +1,32 @@
+{
+  "name": "brewdesk-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BrewDesk — Sistema de Gestión y Control de Cafeterías (Monorepo)",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "pnpm --filter @brewdesk/api dev",
+    "dev:web": "pnpm --filter @brewdesk/web dev",
+    "dev": "pnpm --parallel dev:api dev:web",
+    "build": "pnpm --recursive run build",
+    "db:generate": "pnpm --filter @brewdesk/api db:generate",
+    "db:migrate": "pnpm --filter @brewdesk/api db:migrate",
+    "db:migrate:prod": "pnpm --filter @brewdesk/api db:migrate:prod",
+    "db:push": "pnpm --filter @brewdesk/api db:push",
+    "db:seed": "pnpm --filter @brewdesk/api db:seed",
+    "db:studio": "pnpm --filter @brewdesk/api db:studio",
+    "test": "pnpm --recursive run test"
+  },
+  "keywords": [
+    "pos",
+    "cafe",
+    "point-of-sale",
+    "restaurant",
+    "inventory",
+    "kds"
+  ],
+  "author": "",
+  "license": "ISC"
+}

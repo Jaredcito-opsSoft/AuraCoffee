@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>BrewDesk ☕ — Beta Preview POS & KDS Cafetería</title>
+  <meta name="theme-color" content="#0F0C08">
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet">
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            serif: ['"Playfair Display"', 'serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            brand: {
+              black: '#0F0C08',
+              surface: '#18130C',
+              card: '#1F1910',
+              border: '#2E2419',
+              gold: '#D97706',
+              goldLight: '#F59E0B',
+              cream: '#FDF8F0',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- React & Babel -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    body { background-color: #0F0C08; color: #FDF8F0; }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #120E0A; }
+    ::-webkit-scrollbar-thumb { background: #2E2419; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #D97706; }
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 0.8; }
+      50% { opacity: 0.4; }
+    }
+    .pulse-glow { animation: pulseGlow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+  </style>
+</head>
+<body class="h-screen w-screen overflow-hidden select-none">
+  <div id="root" class="h-full w-full"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // --- MOCK DATABASE ---
+    const INITIAL_CATEGORIES = [
+      { id: 1, name: 'Café Caliente', icon: '☕', color: '#D97706' },
+      { id: 2, name: 'Café Frío & Cold Brew', icon: '🧊', color: '#0284C7' },
+      { id: 3, name: 'Matcha & Tés', icon: '🍵', color: '#059669' },
+      { id: 4, name: 'Repostería', icon: '🥐', color: '#D97706' },
+      { id: 5, name: 'Alimentos & Paninis', icon: '🥪', color: '#E11D48' },
+    ];
+
+    const INITIAL_MODIFIERS = [
+      { id: 1, group: 'milk', name: 'Leche de Avena Barista (+ $15)', price: 15 },
+      { id: 2, group: 'milk', name: 'Leche de Almendra (+ $15)', price: 15 },
+      { id: 3, group: 'milk', name: 'Leche Deslactosada', price: 0 },
+      { id: 4, group: 'syrup', name: 'Vainilla de Papantla (+ $12)', price: 12 },
+      { id: 5, group: 'syrup', name: 'Caramelo Salado (+ $12)', price: 12 },
+      { id: 6, group: 'extra', name: 'Shot Extra Espresso (+ $15)', price: 15 },
+      { id: 7, group: 'extra', name: 'Grano Oaxaca Lavado (+ $10)', price: 10 },
+    ];
+
+    const INITIAL_PRODUCTS = [
+      { id: 1, catId: 1, name: 'Espresso Doble Especial', price: 38, desc: 'Doble extracción ratio 1:2 notas chocolate y avellana', station: 'barista_hot', available: true },
+      { id: 2, catId: 1, name: 'Flat White Australiano (8oz)', price: 62, desc: 'Doble ristretto con microespuma de leche sedosa', station: 'barista_hot', hasMods: true, available: true },
+      { id: 3, catId: 1, name: 'Café Latte de la Casa', price: 65, desc: 'Espresso con abundante leche emulsionada cremosa', station: 'barista_hot', variants: [{ name: '12oz', price: 65 }, { name: '16oz', price: 75 }], hasMods: true, available: true },
+      { id: 4, catId: 1, name: 'Cappuccino Italiano', price: 60, desc: 'Clásico con densa corona de espuma de terciopelo', station: 'barista_hot', variants: [{ name: '8oz', price: 60 }, { name: '12oz', price: 68 }], hasMods: true, available: true },
+      { id: 5, catId: 2, name: 'Cold Brew Macerado 18h', price: 70, desc: 'Extracción en frío lenta, baja acidez y dulzor natural', station: 'barista_cold', hasMods: true, available: true },
+      { id: 6, catId: 2, name: 'Iced Vanilla Cream Cold Brew', price: 82, desc: 'Cold brew sobre hielo con crema montada de vainilla', station: 'barista_cold', available: true },
+      { id: 7, catId: 3, name: 'Matcha Latte Ceremonial Uji', price: 78, desc: 'Matcha japonés batido tradicional con batidor chasen', station: 'barista_hot', variants: [{ name: 'Caliente 12oz', price: 78 }, { name: 'Iced 16oz', price: 85 }], hasMods: true, available: true },
+      { id: 8, catId: 4, name: 'Croissant Francés de Mantequilla', price: 48, desc: 'Hojaldrado artesanal 100% mantequilla pura de vaca', station: 'bakery', available: true },
+      { id: 9, catId: 5, name: 'Panini Serrano, Gouda y Pesto', price: 125, desc: 'Ciabatta rústica tostada al grill con jamón serrano', station: 'kitchen', available: true },
+    ];
+
+    const INITIAL_CUSTOMERS = [
+      { id: 1, name: 'Mariana Gómez', phone: '9611234567', points: 120 },
+      { id: 2, name: 'Roberto Domínguez', phone: '9619876543', points: 45 },
+      { id: 3, name: 'Andrea Zenteno', phone: '9615551234', points: 210 },
+    ];
+
+    const INITIAL_INVENTORY = [
+      { id: 1, name: 'Café Grano Chiapas Tostado', cat: 'Granos', stock: 18000, min: 3000, unit: 'g', cost: 0.35, status: 'optimal' },
+      { id: 2, name: 'Café Grano Oaxaca Lavado', cat: 'Granos', stock: 2200, min: 2500, unit: 'g', cost: 0.42, status: 'critical' },
+      { id: 3, name: 'Leche Entera Santa Clara', cat: 'Lácteos', stock: 28000, min: 6000, unit: 'ml', cost: 0.03, status: 'optimal' },
+      { id: 4, name: 'Bebida de Avena Barista', cat: 'Lácteos', stock: 4200, min: 3000, unit: 'ml', cost: 0.07, status: 'warning' },
+      { id: 5, name: 'Jarabe Vainilla de Papantla', cat: 'Jarabes', stock: 2500, min: 500, unit: 'ml', cost: 0.22, status: 'optimal' },
+      { id: 6, name: 'Vaso Biodegradable 12oz', cat: 'Vasos', stock: 85, min: 150, unit: 'pza', cost: 3.80, status: 'critical' },
+      { id: 7, name: 'Croissant Francés Mantequilla', cat: 'Panadería', stock: 24, min: 8, unit: 'pza', cost: 21.00, status: 'optimal' },
+      { id: 8, name: 'Panini Serrano y Gouda', cat: 'Cocina', stock: 14, min: 5, unit: 'pza', cost: 48.00, status: 'optimal' },
+    ];
+
+    const INITIAL_KDS_ORDERS = [
+      {
+        id: 1,
+        folio: 'CMD-0001',
+        type: 'dine_in',
+        table: 'M-02',
+        customer: 'Mariana Gómez',
+        elapsed: 4,
+        items: [
+          { id: 1, name: 'Flat White Australiano (8oz)', qty: 1, mods: ['Leche de Avena (+ $15)'], notes: 'Poco caliente, en taza de barro', status: 'preparing' },
+          { id: 2, name: 'Croissant Francés de Mantequilla', qty: 1, mods: [], notes: '', status: 'ready' },
+        ]
+      },
+      {
+        id: 2,
+        folio: 'CMD-0002',
+        type: 'takeaway',
+        table: null,
+        customer: 'Roberto D.',
+        elapsed: 8,
+        items: [
+          { id: 3, name: 'Cold Brew Macerado 18h', qty: 2, mods: ['Caramelo Salado (+ $12)'], notes: 'Mucho hielo', status: 'pending' },
+        ]
+      },
+      {
+        id: 3,
+        folio: 'CMD-0003',
+        type: 'dine_in',
+        table: 'T-01',
+        customer: 'Familia Zenteno',
+        elapsed: 12,
+        items: [
+          { id: 4, name: 'Panini Serrano, Gouda y Pesto', qty: 2, mods: [], notes: 'Bien tostado al grill', status: 'preparing' },
+          { id: 5, name: 'Café Latte de la Casa (16oz)', qty: 2, mods: ['Shot Extra Espresso (+ $15)'], notes: '', status: 'pending' },
+        ]
+      }
+    ];
+
+    // --- MAIN APP COMPONENT ---
+    function App() {
+      // User auth state
+      const [user, setUser] = useState({ id: 1, name: 'Ana Morales', role: 'cashier' });
+      const [currentView, setCurrentView] = useState('pos'); // pos, kds, inventory, cash, dashboard, products
+
+      // POS state
+      const [cart, setCart] = useState([]);
+      const [orderType, setOrderType] = useState('takeaway'); // takeaway, dine_in
+      const [selectedTable, setSelectedTable] = useState('M-01');
+      const [customerName, setCustomerName] = useState('');
+      const [selectedCustomer, setSelectedCustomer] = useState(null);
+      const [selectedCategory, setSelectedCategory] = useState(1);
+      const [searchQuery, setSearchQuery] = useState('');
+
+      // Customization Modal
+      const [customizingProduct, setCustomizingProduct] = useState(null);
+      const [selectedVariant, setSelectedVariant] = useState(null);
+      const [selectedMods, setSelectedMods] = useState([]);
+      const [itemNotes, setItemNotes] = useState('');
+
+      // Payment & Ticket Modal
+      const [showPaymentModal, setShowPaymentModal] = useState(false);
+      const [paymentMethod, setPaymentMethod] = useState('cash');
+      const [cashGiven, setCashGiven] = useState(0);
+      const [completedTicket, setCompletedTicket] = useState(null);
+
+      // KDS Orders state
+      const [kdsOrders, setKdsOrders] = useState(INITIAL_KDS_ORDERS);
+      const [kdsStation, setKdsStation] = useState('all');
+
+      // Inventory state
+      const [inventory, setInventory] = useState(INITIAL_INVENTORY);
+      const [stockModal, setStockModal] = useState(null); // { type: 'entry'|'waste', item }
+      const [stockQty, setStockQty] = useState('');
+      const [stockReason, setStockReason] = useState('');
+
+      // Cash session state
+      const [cashSession, setCashSession] = useState({
+        isOpen: true,
+        register: 'Caja Mostrador Principal (CAJA-01)',
+        openedAt: '08:00 AM',
+        initialBalance: 500,
+        expectedCash: 1240,
+        cardSales: 1680,
+        transferSales: 0,
+        tips: 150,
+        ticketCount: 18,
+      });
+      const [corteZModal, setCorteZModal] = useState(false);
+      const [blindCash, setBlindCash] = useState(1240);
+
+      // System clock
+      const [clock, setClock] = useState('');
+      useEffect(() => {
+        const updateClock = () => {
+          const now = new Date();
+          setClock(now.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        };
+        updateClock();
+        const t = setInterval(updateClock, 1000);
+        return () => clearInterval(t);
+      }, []);
+
+      // Calculate Cart totals
+      const cartSubtotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
+      const cartTotal = cartSubtotal;
+
+      // Handle Adding item to Cart
+      const handleProductClick = (product) => {
+        if (!product.available) return;
+        if (product.variants || product.hasMods) {
+          setCustomizingProduct(product);
+          setSelectedVariant(product.variants ? product.variants[0] : null);
+          setSelectedMods([]);
+          setItemNotes('');
+        } else {
+          addItemToCart(product, null, [], '');
+        }
+      };
+
+      const addItemToCart = (product, variant, mods, notes) => {
+        const basePrice = variant ? variant.price : product.price;
+        const modsPrice = mods.reduce((acc, m) => acc + m.price, 0);
+        const unitPrice = basePrice + modsPrice;
+        const key = `${product.id}_${variant ? variant.name : ''}_${mods.map(m => m.id).sort().join('-')}_${notes}`;
+
+        setCart(prev => {
+          const idx = prev.findIndex(i => i.key === key);
+          if (idx > -1) {
+            const next = [...prev];
+            next[idx].qty += 1;
+            next[idx].totalPrice = next[idx].qty * unitPrice;
+            return next;
+          }
+          return [...prev, {
+            key,
+            id: product.id,
+            name: product.name,
+            variantName: variant ? variant.name : '',
+            mods,
+            notes,
+            unitPrice,
+            qty: 1,
+            totalPrice: unitPrice,
+          }];
+        });
+      };
+
+      const updateCartQty = (key, delta) => {
+        setCart(prev => prev.map(item => {
+          if (item.key === key) {
+            const newQty = item.qty + delta;
+            return newQty > 0 ? { ...item, qty: newQty, totalPrice: newQty * item.unitPrice } : null;
+          }
+          return item;
+        }).filter(Boolean));
+      };
+
+      // Send Order to KDS
+      const handleSendToKds = () => {
+        if (cart.length === 0) return;
+        const folio = `CMD-000${kdsOrders.length + 1}`;
+        const newOrder = {
+          id: Date.now(),
+          folio,
+          type: orderType,
+          table: orderType === 'dine_in' ? selectedTable : null,
+          customer: customerName || (selectedCustomer ? selectedCustomer.name : 'Cliente Mostrador'),
+          elapsed: 0,
+          items: cart.map((i, idx) => ({
+            id: Date.now() + idx,
+            name: `${i.name} ${i.variantName ? `(${i.variantName})` : ''}`,
+            qty: i.qty,
+            mods: i.mods.map(m => m.name),
+            notes: i.notes,
+            status: 'pending',
+          }))
+        };
+        setKdsOrders(prev => [newOrder, ...prev]);
+        setCart([]);
+        setCustomerName('');
+        alert(`✨ Comanda ${folio} enviada a Barra en tiempo real.`);
+      };
+
+      // Open Checkout
+      const handleOpenCheckout = () => {
+        if (cart.length === 0) return;
+        setCashGiven(cartTotal);
+        setShowPaymentModal(true);
+      };
+
+      // Confirm Payment
+      const handleConfirmPayment = () => {
+        const ticketFolio = `TKT-000${cashSession.ticketCount + 1}`;
+        const change = Math.max(0, cashGiven - cartTotal);
+        
+        // Update cash session
+        if (paymentMethod === 'cash') {
+          setCashSession(prev => ({
+            ...prev,
+            expectedCash: prev.expectedCash + cartTotal,
+            ticketCount: prev.ticketCount + 1,
+          }));
+        } else {
+          setCashSession(prev => ({
+            ...prev,
+            cardSales: prev.cardSales + cartTotal,
+            ticketCount: prev.ticketCount + 1,
+          }));
+        }
+
+        // Also push to KDS
+        handleSendToKds();
+
+        setCompletedTicket({
+          folio: ticketFolio,
+          total: cartTotal,
+          paymentMethod,
+          cashGiven,
+          change,
+          items: [...cart],
+          time: new Date().toLocaleTimeString(),
+        });
+
+        setShowPaymentModal(false);
+      };
+
+      // KDS Status Transition
+      const advanceItemStatus = (orderId, itemId) => {
+        setKdsOrders(prev => prev.map(order => {
+          if (order.id === orderId) {
+            const nextItems = order.items.map(item => {
+              if (item.id === itemId) {
+                const nextStatus = item.status === 'pending' ? 'preparing' : item.status === 'preparing' ? 'ready' : 'delivered';
+                return { ...item, status: nextStatus };
+              }
+              return item;
+            });
+            return { ...order, items: nextItems };
+          }
+          return order;
+        }));
+      };
+
+      return (
+        <div className="flex h-screen w-screen overflow-hidden bg-[#0F0C08] text-[#FDF8F0] font-sans">
+          
+          {/* SIDEBAR */}
+          <aside className="w-64 bg-[#14100B] border-r border-[#2A2016] flex flex-col justify-between shrink-0 select-none">
+            <div>
+              {/* Brand */}
+              <div className="p-4 border-b border-[#2A2016] flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center text-xl shadow-lg shadow-amber-950/50">
+                  ☕
+                </div>
+                <div>
+                  <h1 className="font-serif text-lg font-bold text-amber-50 leading-tight">BrewDesk</h1>
+                  <span className="text-[10px] tracking-widest text-amber-400 font-semibold uppercase">Cafetería & POS</span>
+                </div>
+              </div>
+
+              {/* Status Pill */}
+              <div className="p-3">
+                <div className="px-3 py-2 rounded-xl bg-emerald-950/30 border border-emerald-800/40 text-emerald-300 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="font-medium text-[11px] truncate max-w-[120px]">Caja 01 Abierta</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-400/80">$1,240</span>
+                </div>
+              </div>
+
+              {/* Nav Links */}
+              <nav className="px-3 space-y-1">
+                {[
+                  { id: 'pos', label: 'Terminal POS', icon: '🛍️' },
+                  { id: 'kds', label: 'Pantalla KDS', icon: '👨‍🍳', badge: kdsOrders.length },
+                  { id: 'inventory', label: 'Inventario & Kardex', icon: '📦' },
+                  { id: 'cash', label: 'Caja & Turnos', icon: '💵' },
+                  { id: 'dashboard', label: 'Métricas & Ventas', icon: '📊' },
+                  { id: 'products', label: 'Catálogo de Productos', icon: '☕' },
+                ].map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => setCurrentView(item.id)}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                      currentView === item.id
+                        ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30 shadow-inner'
+                        : 'text-stone-400 hover:text-stone-200 hover:bg-[#1E1811]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-base">{item.icon}</span>
+                      <span>{item.label}</span>
+                    </div>
+                    {item.badge > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-stone-950 text-[10px] font-bold font-mono">
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </nav>
+            </div>
+
+            {/* User switch footer */}
+            <div className="p-3 border-t border-[#2A2016] bg-[#100C08]">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-full bg-stone-800 border border-stone-700 flex items-center justify-center text-xs text-amber-400 font-bold">
+                    {user.name[0]}
+                  </div>
+                  <div className="leading-tight">
+                    <p className="text-xs font-semibold text-stone-200">{user.name}</p>
+                    <span className="text-[10px] text-amber-500 capitalize">{user.role}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[10px]">
+                <button
+                  onClick={() => setUser({ id: 1, name: 'Ana Morales', role: 'cashier' })}
+                  className={`py-1 rounded border text-center transition-colors ${user.role === 'cashier' ? 'border-amber-500 text-amber-300 bg-amber-500/10' : 'border-[#2A2016] text-stone-400 hover:bg-stone-800'}`}
+                >
+                  Cajera
+                </button>
+                <button
+                  onClick={() => { setUser({ id: 2, name: 'Mateo Rivas', role: 'barista' }); setCurrentView('kds'); }}
+                  className={`py-1 rounded border text-center transition-colors ${user.role === 'barista' ? 'border-amber-500 text-amber-300 bg-amber-500/10' : 'border-[#2A2016] text-stone-400 hover:bg-stone-800'}`}
+                >
+                  Barista
+                </button>
+              </div>
+            </div>
+          </aside>
+
+          {/* MAIN CONTENT AREA */}
+          <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+            {/* Top Navbar */}
+            <header className="h-12 bg-[#14100B] border-b border-[#2A2016] px-5 flex items-center justify-between shrink-0 select-none">
+              <div className="flex items-center gap-3">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span className="text-xs font-semibold text-stone-300">Terminal Principal TPV-01</span>
+                <span className="text-stone-700">|</span>
+                <span className="text-xs text-amber-400 font-mono">Modo Demo Activo (Full Offline)</span>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="px-2.5 py-0.5 rounded-lg bg-[#0F0C08] border border-[#2A2016] font-mono text-xs text-amber-400 font-bold">
+                  {clock || '12:00:00'}
+                </div>
+              </div>
+            </header>
+
+            {/* VIEW ROUTER */}
+            <main className="flex-1 overflow-hidden p-4">
+              
+              {/* 1. POS TERMINAL VIEW */}
+              {currentView === 'pos' && (
+                <div className="flex h-full gap-4">
+                  {/* Catalog Area */}
+                  <div className="flex-1 flex flex-col min-w-0 bg-[#14100B] border border-[#2A2016] rounded-2xl overflow-hidden">
+                    {/* Category tabs & Search */}
+                    <div className="p-3.5 border-b border-[#2A2016] bg-[#18130C] space-y-3">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={searchQuery}
+                          onChange={e => setSearchQuery(e.target.value)}
+                          placeholder="Buscar bebida, postre o panini..."
+                          className="flex-1 bg-[#100C08] border border-[#2E2419] rounded-xl px-3.5 py-1.5 text-xs text-stone-100 placeholder-stone-500 focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        <button
+                          onClick={() => setSelectedCategory('all')}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                            selectedCategory === 'all' ? 'bg-amber-500 text-stone-950 font-bold' : 'bg-[#20180F] text-stone-300 border border-[#34271A]'
+                          }`}
+                        >
+                          Todos
+                        </button>
+                        {INITIAL_CATEGORIES.map(cat => (
+                          <button
+                            key={cat.id}
+                            onClick={() => setSelectedCategory(cat.id)}
+                            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all ${
+                              selectedCategory === cat.id ? 'bg-amber-500 text-stone-950 font-bold' : 'bg-[#20180F] text-stone-300 border border-[#34271A]'
+                            }`}
+                          >
+                            <span>{cat.icon}</span>
+                            <span>{cat.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Products Grid */}
+                    <div className="flex-1 overflow-y-auto p-3.5 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {INITIAL_PRODUCTS
+                        .filter(p => (selectedCategory === 'all' || p.catId === selectedCategory) && (!searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase())))
+                        .map(p => (
+                          <button
+                            key={p.id}
+                            onClick={() => handleProductClick(p)}
+                            className="bg-[#18130C] hover:bg-[#20180F] border border-[#2E2419] hover:border-amber-500/60 rounded-2xl p-3 text-left flex flex-col justify-between h-32 transition-all active:scale-[0.98]"
+                          >
+                            <div>
+                              <h4 className="font-semibold text-xs text-stone-100 line-clamp-1">{p.name}</h4>
+                              <p className="text-[10px] text-stone-400 line-clamp-2 mt-0.5">{p.desc}</p>
+                            </div>
+                            <div className="flex justify-between items-end pt-2 border-t border-[#2A2016]/40">
+                              <span className="font-mono text-sm font-bold text-amber-400">${p.price}.00</span>
+                              {p.variants && <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30">Tamaños</span>}
+                            </div>
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+
+                  {/* Cart / Comanda Panel */}
+                  <div className="w-80 bg-[#14100B] border border-[#2A2016] rounded-2xl flex flex-col overflow-hidden shrink-0">
+                    {/* Mode Toggle */}
+                    <div className="p-3 border-b border-[#2A2016] bg-[#18130C] space-y-2">
+                      <div className="grid grid-cols-2 p-1 bg-[#100C08] rounded-xl border border-[#2A2016]">
+                        <button
+                          onClick={() => setOrderType('takeaway')}
+                          className={`py-1 text-xs font-semibold rounded-lg transition-all ${orderType === 'takeaway' ? 'bg-amber-500 text-stone-950 font-bold' : 'text-stone-400'}`}
+                        >
+                          Para Llevar
+                        </button>
+                        <button
+                          onClick={() => setOrderType('dine_in')}
+                          className={`py-1 text-xs font-semibold rounded-lg transition-all ${orderType === 'dine_in' ? 'bg-amber-500 text-stone-950 font-bold' : 'text-stone-400'}`}
+                        >
+                          En Mesa
+                        </button>
+                      </div>
+
+                      {orderType === 'dine_in' ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-stone-400">Mesa:</span>
+                          <select
+                            value={selectedTable}
+                            onChange={e => setSelectedTable(e.target.value)}
+                            className="flex-1 bg-[#100C08] border border-[#2E2419] rounded-lg px-2 py-1 text-xs text-stone-200"
+                          >
+                            <option value="M-01">Mesa 01 (Salón)</option>
+                            <option value="M-02">Mesa 02 (Salón)</option>
+                            <option value="T-01">Terraza Jardín</option>
+                            <option value="BAR-1">Barra Alta</option>
+                          </select>
+                        </div>
+                      ) : (
+                        <input
+                          type="text"
+                          value={customerName}
+                          onChange={e => setCustomerName(e.target.value)}
+                          placeholder="Nombre para vocear..."
+                          className="w-full bg-[#100C08] border border-[#2E2419] rounded-lg px-3 py-1 text-xs text-stone-100 placeholder-stone-600 focus:outline-none focus:border-amber-500"
+                        />
+                      )}
+                    </div>
+
+                    {/* Cart Items */}
+                    <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                      {cart.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-stone-500 text-xs text-center">
+                          <span className="text-2xl mb-1">🛒</span>
+                          <span>Orden vacía. Toca un café para comenzar.</span>
+                        </div>
+                      ) : (
+                        cart.map(item => (
+                          <div key={item.key} className="p-2 rounded-xl bg-[#18130C] border border-[#2E2419] space-y-1">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <span className="text-xs font-bold text-stone-100">{item.name}</span>
+                                {item.variantName && <span className="text-[10px] text-amber-400 ml-1">({item.variantName})</span>}
+                              </div>
+                              <span className="font-mono text-xs font-bold text-stone-200">${item.totalPrice}.00</span>
+                            </div>
+                            {item.mods.length > 0 && (
+                              <div className="text-[10px] text-stone-400">
+                                {item.mods.map((m, i) => <div key={i}>+ {m.name}</div>)}
+                              </div>
+                            )}
+                            {item.notes && <p className="text-[9px] italic text-amber-300">"{item.notes}"</p>}
+                            <div className="flex justify-between items-center pt-1 border-t border-[#2A2016]/40">
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => updateCartQty(item.key, -1)} className="w-5 h-5 rounded bg-[#20180F] border border-[#34271A] text-xs text-stone-300 flex items-center justify-center">-</button>
+                                <span className="font-mono text-xs font-bold w-4 text-center">{item.qty}</span>
+                                <button onClick={() => updateCartQty(item.key, 1)} className="w-5 h-5 rounded bg-[#20180F] border border-[#34271A] text-xs text-stone-300 flex items-center justify-center">+</button>
+                              </div>
+                              <button onClick={() => setCart(prev => prev.filter(i => i.key !== item.key))} className="text-stone-500 hover:text-red-400 text-xs">✕</button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Checkout Box */}
+                    <div className="p-3 border-t border-[#2A2016] bg-[#18130C] space-y-2">
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-xs text-stone-400">Total a Pagar:</span>
+                        <span className="font-mono text-lg font-bold text-amber-400">${cartTotal}.00 MXN</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          disabled={cart.length === 0}
+                          onClick={handleSendToKds}
+                          className="py-2 rounded-xl bg-[#20180F] hover:bg-amber-500/20 border border-amber-600/40 text-amber-300 font-bold text-xs disabled:opacity-40"
+                        >
+                          A Barra (KDS)
+                        </button>
+                        <button
+                          disabled={cart.length === 0}
+                          onClick={handleOpenCheckout}
+                          className="py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs shadow-lg shadow-amber-950/50 disabled:opacity-40"
+                        >
+                          Cobrar Venta
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 2. KDS KITCHEN DISPLAY VIEW */}
+              {currentView === 'kds' && (
+                <div className="flex flex-col h-full space-y-3">
+                  <div className="flex justify-between items-center p-3 bg-[#14100B] border border-[#2A2016] rounded-2xl shrink-0">
+                    <div className="flex gap-2">
+                      {[
+                        { id: 'all', label: 'Todas las Estaciones' },
+                        { id: 'barista_hot', label: 'Barra Caliente' },
+                        { id: 'barista_cold', label: 'Barra Fría' },
+                        { id: 'kitchen', label: 'Cocina & Paninis' },
+                      ].map(st => (
+                        <button
+                          key={st.id}
+                          onClick={() => setKdsStation(st.id)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold ${
+                            kdsStation === st.id ? 'bg-amber-500 text-stone-950 font-bold' : 'bg-[#20180F] text-stone-300 border border-[#34271A]'
+                          }`}
+                        >
+                          {st.label}
+                        </button>
+                      ))}
+                    </div>
+                    <span className="text-xs font-mono text-stone-400">{kdsOrders.length} comandas en preparación</span>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {kdsOrders.map(order => (
+                      <div
+                        key={order.id}
+                        className={`bg-[#18130C] rounded-2xl border flex flex-col justify-between overflow-hidden shadow-lg ${
+                          order.elapsed >= 10 ? 'border-red-500/60' : order.elapsed >= 6 ? 'border-amber-500/60' : 'border-emerald-500/50'
+                        }`}
+                      >
+                        <div className="p-3 border-b border-[#2A2016] bg-[#120E0A] flex justify-between items-center">
+                          <div>
+                            <span className="font-mono text-sm font-bold text-amber-400">{order.folio}</span>
+                            <span className="text-[10px] ml-2 px-2 py-0.5 rounded bg-stone-800 text-stone-300">
+                              {order.type === 'dine_in' ? order.table : 'Para Llevar'}
+                            </span>
+                            <p className="text-xs font-semibold text-stone-200">{order.customer}</p>
+                          </div>
+                          <span className={`font-mono text-xs font-bold px-2 py-0.5 rounded ${
+                            order.elapsed >= 10 ? 'bg-red-950 text-red-300' : order.elapsed >= 6 ? 'bg-amber-950 text-amber-300' : 'bg-emerald-950 text-emerald-300'
+                          }`}>
+                            ⏱ {order.elapsed} min
+                          </span>
+                        </div>
+
+                        <div className="p-3 space-y-2 flex-1">
+                          {order.items.map(item => (
+                            <div
+                              key={item.id}
+                              onClick={() => advanceItemStatus(order.id, item.id)}
+                              className="p-2 rounded-xl bg-[#100C08] border border-[#2A2016] cursor-pointer hover:border-amber-500/40 transition-colors"
+                            >
+                              <div className="flex justify-between items-center">
+                                <span className="text-xs font-bold text-stone-100">{item.qty}x {item.name}</span>
+                                <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded border ${
+                                  item.status === 'ready' ? 'bg-emerald-950/60 border-emerald-500 text-emerald-300' :
+                                  item.status === 'preparing' ? 'bg-amber-950/60 border-amber-500 text-amber-300' : 'bg-stone-900 border-stone-700 text-stone-400'
+                                }`}>
+                                  {item.status === 'ready' ? 'Listo' : item.status === 'preparing' ? 'Preparando' : 'Espera'}
+                                </span>
+                              </div>
+                              {item.mods.length > 0 && <p className="text-[10px] text-amber-300/80 mt-0.5">{item.mods.join(', ')}</p>}
+                              {item.notes && <p className="text-[9px] italic text-stone-400">"{item.notes}"</p>}
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="p-2 border-t border-[#2A2016] bg-[#120E0A] flex justify-end">
+                          <button
+                            onClick={() => setKdsOrders(prev => prev.filter(o => o.id !== order.id))}
+                            className="px-3 py-1 rounded-lg bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs font-bold"
+                          >
+                            ✓ Entregar Comanda
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 3. INVENTORY & KARDEX VIEW */}
+              {currentView === 'inventory' && (
+                <div className="h-full flex flex-col space-y-3">
+                  <div className="flex justify-between items-center p-3 bg-[#14100B] border border-[#2A2016] rounded-2xl">
+                    <div>
+                      <h2 className="font-serif text-lg font-bold text-stone-100">Semáforo de Existencias & Insumos</h2>
+                      <p className="text-[11px] text-stone-400">Descuentos automáticos vinculados a recetas (BOM)</p>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 bg-[#14100B] border border-[#2A2016] rounded-2xl overflow-y-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-[#18130C] border-b border-[#2A2016] text-stone-400 font-mono text-[10px] uppercase">
+                        <tr>
+                          <th className="p-3">Estado</th>
+                          <th className="p-3">Insumo</th>
+                          <th className="p-3">Categoría</th>
+                          <th className="p-3 text-right">Existencia</th>
+                          <th className="p-3 text-right">Stock Mínimo</th>
+                          <th className="p-3 text-center">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#2A2016]">
+                        {inventory.map(item => (
+                          <tr key={item.id} className="hover:bg-[#18130C]">
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                item.status === 'critical' ? 'bg-red-950 border border-red-800 text-red-300' :
+                                item.status === 'warning' ? 'bg-amber-950 border border-amber-800 text-amber-300' : 'bg-emerald-950 border border-emerald-800 text-emerald-300'
+                              }`}>
+                                {item.status.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="p-3 font-semibold text-stone-200">{item.name}</td>
+                            <td className="p-3 text-stone-400">{item.cat}</td>
+                            <td className="p-3 text-right font-mono font-bold text-stone-100">{item.stock.toLocaleString()} {item.unit}</td>
+                            <td className="p-3 text-right font-mono text-stone-500">{item.min.toLocaleString()} {item.unit}</td>
+                            <td className="p-3 text-center space-x-1">
+                              <button
+                                onClick={() => {
+                                  const add = prompt(`Ingresar cantidad para ${item.name} (${item.unit}):`);
+                                  if (add && !isNaN(add)) {
+                                    setInventory(prev => prev.map(i => i.id === item.id ? { ...i, stock: i.stock + Number(add), status: 'optimal' } : i));
+                                  }
+                                }}
+                                className="px-2 py-1 bg-emerald-950 text-emerald-300 rounded font-semibold text-[10px]"
+                              >
+                                + Entrada
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const waste = prompt(`Registrar merma para ${item.name} (${item.unit}):`);
+                                  if (waste && !isNaN(waste)) {
+                                    setInventory(prev => prev.map(i => i.id === item.id ? { ...i, stock: Math.max(0, i.stock - Number(waste)) } : i));
+                                  }
+                                }}
+                                className="px-2 py-1 bg-red-950 text-red-300 rounded font-semibold text-[10px]"
+                              >
+                                Merma
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 4. CASH SESSIONS VIEW */}
+              {currentView === 'cash' && (
+                <div className="h-full max-w-4xl mx-auto space-y-4">
+                  <div className="bg-[#14100B] border border-[#2A2016] rounded-2xl p-5 space-y-4">
+                    <div className="flex justify-between items-center border-b border-[#2A2016] pb-3">
+                      <div>
+                        <h2 className="font-serif text-lg font-bold text-stone-100">{cashSession.register}</h2>
+                        <p className="text-xs text-stone-400">Turno iniciado a las {cashSession.openedAt} por {user.name}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            const exp = prompt('Monto de gasto de caja chica ($ MXN):');
+                            if (exp && !isNaN(exp)) {
+                              setCashSession(prev => ({ ...prev, expectedCash: prev.expectedCash - Number(exp) }));
+                              alert('Gasto registrado.');
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-[#20180F] border border-[#34271A] text-xs font-semibold text-amber-300"
+                        >
+                          - Salida / Gasto
+                        </button>
+                        <button
+                          onClick={() => setCorteZModal(true)}
+                          className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-stone-100 text-xs font-bold"
+                        >
+                          Corte Z (Cierre)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="p-3 bg-[#18130C] border border-[#2E2419] rounded-xl">
+                        <span className="text-[10px] text-stone-500 block uppercase font-mono">Fondo Inicial</span>
+                        <span className="font-mono text-base font-bold text-stone-200">${cashSession.initialBalance}.00</span>
+                      </div>
+                      <div className="p-3 bg-[#18130C] border border-[#2E2419] rounded-xl">
+                        <span className="text-[10px] text-stone-500 block uppercase font-mono">Efectivo Teórico</span>
+                        <span className="font-mono text-base font-bold text-amber-400">${cashSession.expectedCash}.00</span>
+                      </div>
+                      <div className="p-3 bg-[#18130C] border border-[#2E2419] rounded-xl">
+                        <span className="text-[10px] text-stone-500 block uppercase font-mono">Ventas Tarjeta</span>
+                        <span className="font-mono text-base font-bold text-sky-400">${cashSession.cardSales}.00</span>
+                      </div>
+                      <div className="p-3 bg-[#18130C] border border-[#2E2419] rounded-xl">
+                        <span className="text-[10px] text-stone-500 block uppercase font-mono">Tickets Cobrados</span>
+                        <span className="font-mono text-base font-bold text-emerald-400">{cashSession.ticketCount}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 5. METRICS & DASHBOARD VIEW */}
+              {currentView === 'dashboard' && (
+                <div className="h-full overflow-y-auto space-y-4">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="p-4 bg-[#14100B] border border-[#2A2016] rounded-2xl">
+                      <span className="text-xs text-stone-400 block font-mono">Ventas del Día</span>
+                      <span className="font-mono text-xl font-bold text-amber-400">$3,450.00 MXN</span>
+                    </div>
+                    <div className="p-4 bg-[#14100B] border border-[#2A2016] rounded-2xl">
+                      <span className="text-xs text-stone-400 block font-mono">Ticket Promedio</span>
+                      <span className="font-mono text-xl font-bold text-stone-100">$107.80 MXN</span>
+                    </div>
+                    <div className="p-4 bg-[#14100B] border border-[#2A2016] rounded-2xl">
+                      <span className="text-xs text-stone-400 block font-mono">Ocupación Mesas</span>
+                      <span className="font-mono text-xl font-bold text-emerald-400">62% (5/8)</span>
+                    </div>
+                    <div className="p-4 bg-[#14100B] border border-[#2A2016] rounded-2xl">
+                      <span className="text-xs text-stone-400 block font-mono">Alertas Insumos</span>
+                      <span className="font-mono text-xl font-bold text-red-400">2 Insumos</span>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-[#14100B] border border-[#2A2016] rounded-2xl space-y-3">
+                    <h3 className="font-serif font-bold text-stone-100">Top Productos Más Vendidos Hoy</h3>
+                    <div className="space-y-2">
+                      {[
+                        { name: 'Flat White Australiano (8oz)', qty: 16, total: 992 },
+                        { name: 'Cold Brew Macerado 18h', qty: 12, total: 840 },
+                        { name: 'Panini Serrano, Gouda y Pesto', qty: 8, total: 1000 },
+                        { name: 'Café Latte de la Casa', qty: 7, total: 455 },
+                      ].map((item, idx) => (
+                        <div key={idx} className="flex justify-between items-center p-2 rounded-xl bg-[#18130C] border border-[#2E2419] text-xs">
+                          <span className="font-semibold text-stone-200">{item.name}</span>
+                          <span className="font-mono font-bold text-amber-400">{item.qty} vendidos (${item.total}.00)</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 6. PRODUCTS VIEW */}
+              {currentView === 'products' && (
+                <div className="h-full bg-[#14100B] border border-[#2A2016] rounded-2xl overflow-y-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#18130C] border-b border-[#2A2016] text-stone-400 font-mono text-[10px] uppercase">
+                      <tr>
+                        <th className="p-3">Producto</th>
+                        <th className="p-3">Estación</th>
+                        <th className="p-3 text-right">Precio Base</th>
+                        <th className="p-3 text-center">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#2A2016]">
+                      {INITIAL_PRODUCTS.map(p => (
+                        <tr key={p.id} className="hover:bg-[#18130C]">
+                          <td className="p-3 font-semibold text-stone-200">{p.name}</td>
+                          <td className="p-3 font-mono text-amber-300">{p.station}</td>
+                          <td className="p-3 text-right font-mono font-bold text-stone-100">${p.price}.00</td>
+                          <td className="p-3 text-center">
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold">
+                              DISPONIBLE
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+            </main>
+          </div>
+
+          {/* CUSTOMIZATION MODAL */}
+          {customizingProduct && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="w-full max-w-md bg-[#18130C] border border-[#2E2419] rounded-3xl p-5 space-y-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-serif text-lg font-bold text-stone-100">{customizingProduct.name}</h3>
+                    <p className="text-xs text-stone-400">{customizingProduct.desc}</p>
+                  </div>
+                  <button onClick={() => setCustomizingProduct(null)} className="text-stone-400 text-sm">✕</button>
+                </div>
+
+                {customizingProduct.variants && (
+                  <div>
+                    <label className="text-xs font-semibold text-amber-400 block mb-1">Tamaño:</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {customizingProduct.variants.map((v, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setSelectedVariant(v)}
+                          className={`p-2 rounded-xl border text-xs flex justify-between ${selectedVariant?.name === v.name ? 'border-amber-500 bg-amber-500/20 text-amber-300 font-bold' : 'border-[#2A2016] text-stone-300'}`}
+                        >
+                          <span>{v.name}</span>
+                          <span className="font-mono">${v.price}.00</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-xs font-semibold text-amber-400 block mb-1">Modificadores / Extras:</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {INITIAL_MODIFIERS.map(m => {
+                      const active = selectedMods.some(x => x.id === m.id);
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => {
+                            if (active) setSelectedMods(prev => prev.filter(x => x.id !== m.id));
+                            else setSelectedMods(prev => [...prev, m]);
+                          }}
+                          className={`p-2 rounded-xl border text-[11px] text-left flex justify-between items-center ${active ? 'border-amber-500 bg-amber-500/20 text-amber-300 font-bold' : 'border-[#2A2016] text-stone-300'}`}
+                        >
+                          <span className="truncate">{m.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-stone-400 block mb-1">Instrucciones Especiales:</label>
+                  <input
+                    type="text"
+                    value={itemNotes}
+                    onChange={e => setItemNotes(e.target.value)}
+                    placeholder="Ej. Tibio, en taza de barro..."
+                    className="w-full bg-[#100C08] border border-[#2E2419] rounded-xl px-3 py-1.5 text-xs text-stone-100"
+                  />
+                </div>
+
+                <div className="flex justify-between items-center pt-2 border-t border-[#2A2016]">
+                  <span className="font-mono text-base font-bold text-amber-400">
+                    ${(selectedVariant ? selectedVariant.price : customizingProduct.price) + selectedMods.reduce((s, m) => s + m.price, 0)}.00 MXN
+                  </span>
+                  <button
+                    onClick={() => {
+                      addItemToCart(customizingProduct, selectedVariant, selectedMods, itemNotes);
+                      setCustomizingProduct(null);
+                    }}
+                    className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs"
+                  >
+                    Agregar a la Orden
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PAYMENT MODAL */}
+          {showPaymentModal && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="w-full max-w-sm bg-[#18130C] border border-[#2E2419] rounded-3xl p-5 space-y-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-serif text-lg font-bold text-stone-100">Cobro de Orden</h3>
+                    <p className="text-xs text-amber-400">{orderType === 'dine_in' ? `Mesa: ${selectedTable}` : 'Para Llevar'}</p>
+                  </div>
+                  <button onClick={() => setShowPaymentModal(false)} className="text-stone-400">✕</button>
+                </div>
+
+                <div className="p-3 bg-[#100C08] border border-[#2A2016] rounded-xl text-center">
+                  <span className="text-[10px] text-stone-500 font-mono block">TOTAL A COBRAR</span>
+                  <span className="font-serif text-2xl font-bold text-amber-400">${cartTotal}.00 MXN</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setPaymentMethod('cash')}
+                    className={`py-2 rounded-xl text-xs font-bold border ${paymentMethod === 'cash' ? 'bg-amber-500/20 border-amber-500 text-amber-300' : 'border-[#2A2016] text-stone-400'}`}
+                  >
+                    💵 Efectivo
+                  </button>
+                  <button
+                    onClick={() => setPaymentMethod('card')}
+                    className={`py-2 rounded-xl text-xs font-bold border ${paymentMethod === 'card' ? 'bg-amber-500/20 border-amber-500 text-amber-300' : 'border-[#2A2016] text-stone-400'}`}
+                  >
+                    💳 Tarjeta
+                  </button>
+                </div>
+
+                {paymentMethod === 'cash' && (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-xs text-stone-400 block mb-1">Efectivo Recibido:</label>
+                      <input
+                        type="number"
+                        value={cashGiven}
+                        onChange={e => setCashGiven(Number(e.target.value))}
+                        className="w-full bg-[#100C08] border border-[#2E2419] rounded-xl px-3 py-2 text-lg font-mono font-bold text-stone-100"
+                      />
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-800/40 flex justify-between text-xs font-mono">
+                      <span className="text-emerald-300 font-bold">Cambio a Devolver:</span>
+                      <span className="font-bold text-emerald-400">${Math.max(0, cashGiven - cartTotal)}.00 MXN</span>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleConfirmPayment}
+                  className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs"
+                >
+                  Confirmar Cobro y Emitir Ticket
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TICKET MODAL */}
+          {completedTicket && (
+            <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="w-full max-w-xs bg-[#18130C] border border-[#2E2419] rounded-3xl p-5 space-y-4">
+                <div className="text-center">
+                  <span className="text-2xl">☕</span>
+                  <h3 className="font-serif font-bold text-stone-100 text-base">BREWDESK CAFÉ</h3>
+                  <p className="text-[10px] text-stone-400">Folio: {completedTicket.folio}</p>
+                </div>
+
+                <div className="bg-[#100C08] border border-[#2A2016] rounded-xl p-3 font-mono text-xs space-y-1 text-stone-300">
+                  <div className="border-b border-[#2A2016] pb-1 space-y-0.5">
+                    {completedTicket.items.map((it, idx) => (
+                      <div key={idx} className="flex justify-between">
+                        <span>{it.qty}x {it.name}</span>
+                        <span>${it.totalPrice}.00</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-between font-bold pt-1 text-amber-400">
+                    <span>TOTAL:</span>
+                    <span>${completedTicket.total}.00 MXN</span>
+                  </div>
+                  {completedTicket.paymentMethod === 'cash' && (
+                    <div className="flex justify-between text-emerald-400 text-[10px]">
+                      <span>Cambio entregado:</span>
+                      <span>${completedTicket.change}.00</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <button onClick={() => window.print()} className="flex-1 py-2 bg-[#20180F] border border-[#34271A] rounded-xl text-xs font-bold text-stone-300">Imprimir</button>
+                  <button onClick={() => setCompletedTicket(null)} className="flex-1 py-2 bg-amber-500 rounded-xl text-xs font-bold text-stone-950">Aceptar</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* CORTE Z MODAL */}
+          {corteZModal && (
+            <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="w-full max-w-sm bg-[#18130C] border border-[#2E2419] rounded-3xl p-5 space-y-3">
+                <h3 className="font-serif font-bold text-stone-100 text-base">Corte Z (Cierre de Turno)</h3>
+                <p className="text-xs text-stone-400">Introduce el efectivo contado físicamente en cajón:</p>
+                <input
+                  type="number"
+                  value={blindCash}
+                  onChange={e => setBlindCash(Number(e.target.value))}
+                  className="w-full bg-[#100C08] border border-[#2E2419] rounded-xl px-3 py-2 font-mono font-bold text-lg text-amber-400"
+                />
+                <div className="p-2.5 rounded-xl bg-[#100C08] border border-[#2A2016] text-xs font-mono flex justify-between">
+                  <span>Diferencia:</span>
+                  <span className={blindCash - cashSession.expectedCash === 0 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                    ${(blindCash - cashSession.expectedCash).toFixed(2)} MXN
+                  </span>
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button onClick={() => setCorteZModal(false)} className="flex-1 py-2 bg-[#20180F] border border-[#34271A] rounded-xl text-xs text-stone-300">Cancelar</button>
+                  <button
+                    onClick={() => {
+                      alert('Turno cerrado con éxito. Comprobante de Corte Z generado.');
+                      setCorteZModal(false);
+                    }}
+                    className="flex-1 py-2 bg-red-600 rounded-xl text-xs font-bold text-stone-100"
+                  >
+                    Confirmar Cierre
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
