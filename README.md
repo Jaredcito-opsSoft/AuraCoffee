@@ -1,4 +1,4 @@
-# ☕ BrewDesk — Sistema Integral de Gestión y Control de Cafeterías
+# ☕ AuraCoffee— Sistema Integral de Gestión y Control de Cafeterías
 
 > **Sistema de Punto de Venta (POS), Pantalla de Barista (KDS), Inventario con Recetas (BOM/Kardex) y Control de Caja para Cafeterías de Especialidad.**  
 > Desarrollado como un Monorepo robusto con **React 19, Express 5, Prisma 6, PostgreSQL (Supabase) y Tailwind CSS v4**.
